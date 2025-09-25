@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -17,7 +18,8 @@
             border-radius: 8px;
             color: white;
             font-family: Arial, sans-serif;
-            z-index: 100;
+            z-index: 200;
+            min-width: 200px;
         }
         .sat-button {
             display: block;
@@ -33,31 +35,75 @@
         .sat-button:hover {
             background-color: #007bff;
         }
+          /* ... (Mevcut CSS'inize ekleyin) ... */
+
+    #info-panel {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 15px;
+        border-radius: 8px;
+        color: white;
+        font-family: Arial, sans-serif;
+        z-index: 300;
+        width: 260px;
+        line-height: 1.5;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+    }
+    #info-panel h3 { margin-top: 0; }
+    #info-panel span { font-weight: bold; color: #00ff00; } /* Yeşil vurgu */
     </style>
 </head>
 <body>
     <div id="satellite-menu">
-        <h3>Uydu Seçim Menüsü</h3>
-        </div>
+    <div id="satellite-images" style="position:fixed;left:0;right:0;bottom:0;padding:16px 0 8px 0;background:rgba(10,10,30,0.92);z-index:500;display:flex;justify-content:center;gap:32px;min-height:120px;"></div>
+    <div id="satellite-menu-header" style="cursor:pointer;user-select:none;">
+        <h3 style="margin:0;">Uydu Seçim Menüsü <span id="sat-menu-arrow">▼</span></h3>
+    </div>
+    <div id="satellite-menu-list" style="display:none;"></div>
 
+<div id="info-panel">
+    <h3>Uydu Bilgileri</h3>
+    <p>Ad: <span id="info-name">---</span></p>
+    <p>Hız: <span id="info-speed">---</span></p>
+    <p>Yükseklik: <span id="info-alt">---</span></p>
+    <p>Enlem: <span id="info-lat">---</span></p>
+    <p>Boylam: <span id="info-lon">---</span></p>
+</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
     <script>
-        // --- Global Değişkenler ---
+
         let scene, camera, renderer, controls;
-        let earth, satellite;
-        let allOrbitData = {}; // Tüm uyduların verilerini tutacak obje
-        let orbitData = [];     // Şu anda seçili olan uydunun verisi
-        let currentDataIndex = 0;
+        let earth;
+        let satellites = {}; // Tüm uyduların 3D objeleri
+        let selectedSatelliteName = null;
+    let allOrbitData = {}; // Tüm uyduların verilerini tutacak obje
+    let orbitData = [];     // Şu anda seçili olan uydunun verisi
+    let currentDataIndex = 0;
         const EARTH_RADIUS_KM = 6371;
         const ORBIT_ANIMATION_SPEED = 0.05; // Gerçek zamanlıya yakın hız (1/60 veya 1/30 deneyin)
         let lastUpdateTime = performance.now();
+let lastDataTime = null; // Son gösterilen veri zaman damgası (Date objesi)
+let currentAnimationTime = null; // Simüle edilen zaman (Date objesi)
 
         // --- İnisiyalizasyon ---
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050505);
+            // Daha renkli bir uzay arka planı (gradient benzeri)
+            const canvas = document.createElement('canvas');
+            canvas.width = 32; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createLinearGradient(0,0,0,512);
+            grad.addColorStop(0, '#0a0033');
+            grad.addColorStop(0.5, '#1a237e');
+            grad.addColorStop(1, '#00bcd4');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,32,512);
+            const bgTexture = new THREE.CanvasTexture(canvas);
+            scene.background = bgTexture;
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -70,32 +116,33 @@
 
             // Işıklandırma
             const sunLight = new THREE.DirectionalLight(0xffffff, 3.5);
-            sunLight.position.set(50000, 50000, 50000); 
+            sunLight.position.set(50000, 50000, 50000);
             scene.add(sunLight);
-            scene.add(new THREE.AmbientLight(0x444444, 1)); 
-// --- Sade Gerçekçi Dünya ---
-const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS_KM, 64, 64);
-const textureLoader = new THREE.TextureLoader();
+            scene.add(new THREE.AmbientLight(0x444444, 1));
 
-// Gündüz haritası (renkli)
-const dayMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg');
+            // --- Daha Gerçekçi Dünya ---
+            const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS_KM, 64, 64);
+            const textureLoader = new THREE.TextureLoader();
 
-const earthMaterial = new THREE.MeshPhongMaterial({
-    map: dayMap,      // Texture ekledik
-    shininess: 10     // Hafif parlaklık
-});
+            // Gündüz haritası
+            const dayMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg');
+            // Gece haritası
+            const nightMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_lights_2048.png');
+            const earthMaterial = new THREE.MeshPhongMaterial({
+                map: dayMap,
+                shininess: 10,
+                emissiveMap: nightMap,
+                emissive: 0xffffff,
+                emissiveIntensity: 0.7
+            });
+            earth = new THREE.Mesh(earthGeometry, earthMaterial);
+            scene.add(earth);
 
-earth = new THREE.Mesh(earthGeometry, earthMaterial);
-scene.add(earth);
 
-            // Uydu Modeli (Kırmızı küre)
-            const satSize = 100;
-            const satGeometry = new THREE.SphereGeometry(satSize, 16, 16);
-            const satMaterial = new THREE.MeshBasicMaterial({ color: 0xff3300 });
-            satellite = new THREE.Mesh(satGeometry, satMaterial);
-            scene.add(satellite); 
+            // Tüm uydular için 3D model oluşturulacak (seçimden bağımsız)
+            // Her uyduya farklı renk atanacak
+            // Uydular yüklendikten sonra eklenir
 
-            // Kontroller
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.minDistance = EARTH_RADIUS_KM * 1.5; 
             controls.maxDistance = EARTH_RADIUS_KM * 50;
@@ -105,7 +152,6 @@ scene.add(earth);
             loadOrbitData();
         }
 
-        // --- Veri ve Menü Fonksiyonları ---
 
       function loadOrbitData() {
     fetch('all_orbit_data.json') 
@@ -126,28 +172,63 @@ scene.add(earth);
             
             allOrbitData = data;
             createSatelliteMenu(satelliteNames);
-            
+
+            // Tüm uyduları sahneye ekle
+            addAllSatellitesToScene(satelliteNames);
+
             if (satelliteNames.length > 0) {
                 selectSatellite(satelliteNames[0]);
             }
+        // Tüm uyduları sahneye ekle
+        function addAllSatellitesToScene(satelliteNames) {
+            // Önce varsa eski uyduları kaldır
+            Object.values(satellites).forEach(obj => scene.remove(obj));
+            satellites = {};
+            const colorPalette = [0xff3300, 0x00e676, 0x2979ff, 0xffd600, 0xff4081, 0x00bcd4, 0x8d6e63, 0x7c4dff, 0x43a047, 0xd50000, 0x0097a7, 0xc51162, 0x827717, 0x263238];
+            let colorIdx = 0;
+            satelliteNames.forEach(name => {
+                const satSize = 100;
+                const satGeometry = new THREE.SphereGeometry(satSize, 16, 16);
+                const satMaterial = new THREE.MeshBasicMaterial({ color: colorPalette[colorIdx % colorPalette.length] });
+                const satMesh = new THREE.Mesh(satGeometry, satMaterial);
+                satMesh.name = 'satellite_' + name;
+                // Eğer veri varsa ilk yörünge noktasına yerleştir
+                if (allOrbitData[name] && allOrbitData[name].length > 0) {
+                    const first = allOrbitData[name][0];
+                    satMesh.position.set(first.x, first.y, first.z);
+                }
+                scene.add(satMesh);
+                satellites[name] = satMesh;
+                colorIdx++;
+            });
+        }
         })
         .catch(error => console.error('Yörünge verisi yüklenirken HATA:', error));
 }
 
         function createSatelliteMenu(satelliteNames) {
-            const menu = document.getElementById('satellite-menu');
-            menu.innerHTML = '<h3>Uydu Seçim Menüsü</h3>'; 
-
+            const menuList = document.getElementById('satellite-menu-list');
+            menuList.innerHTML = '';
             satelliteNames.forEach(name => {
                 const button = document.createElement('button');
                 button.className = 'sat-button';
                 button.textContent = name;
-                button.onclick = () => selectSatellite(name); 
-                menu.appendChild(button);
+                button.onclick = () => selectSatellite(name);
+                menuList.appendChild(button);
             });
+            // Açılır kapanır menü davranışı
+            const menuHeader = document.getElementById('satellite-menu-header');
+            const menuArrow = document.getElementById('sat-menu-arrow');
+            let menuOpen = false;
+            menuHeader.onclick = function() {
+                menuOpen = !menuOpen;
+                document.getElementById('satellite-menu-list').style.display = menuOpen ? 'block' : 'none';
+                menuArrow.textContent = menuOpen ? '▲' : '▼';
+            };
         }
 
         function selectSatellite(name) {
+            selectedSatelliteName = name;
             if (!allOrbitData[name] || allOrbitData[name].length === 0) return;
 
             // 1. Eski yörünge çizgisini sahneden kaldır
@@ -155,14 +236,21 @@ scene.add(earth);
 
             // 2. Yeni yörünge verisini ata ve animasyonu sıfırla
             orbitData = allOrbitData[name];
-            currentDataIndex = 0; 
+            currentDataIndex = 0;
+            // Animasyon zamanını başa al
+            if (orbitData.length > 0) {
+                lastDataTime = new Date(orbitData[0].time);
+                currentAnimationTime = new Date(orbitData[0].time);
+            }
 
             // 3. Yeni yörünge çizgisini oluştur ve ekle
             drawOrbitPath();
 
-            // 4. Uyduyu yörüngesinin başlangıcına taşı
+            // 4. Seçili uydunun modelini yörüngesinin başına taşı
             const startPos = orbitData[0];
-            satellite.position.set(startPos.x, startPos.y, startPos.z);
+            if (satellites[name]) {
+                satellites[name].position.set(startPos.x, startPos.y, startPos.z);
+            }
 
             console.log(`Uydu değiştirildi: ${name}.`);
         }
@@ -170,12 +258,18 @@ scene.add(earth);
         function drawOrbitPath() {
             const points = orbitData.map(d => new THREE.Vector3(d.x, d.y, d.z));
             const geometry = new THREE.BufferGeometry().setFromPoints(points);
-            
-            // Neon yeşili yörünge çizgisi
-            const material = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+            // Renkli yörünge çizgisi (gökkuşağı geçişli)
+            const colors = [];
+            for (let i = 0; i < points.length; i++) {
+                const t = i / points.length;
+                const color = new THREE.Color();
+                color.setHSL(t, 1, 0.5);
+                colors.push(color.r, color.g, color.b);
+            }
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            const material = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 3 });
             const line = new THREE.Line(geometry, material);
-            
-            line.name = 'orbit_line'; 
+            line.name = 'orbit_line';
             scene.add(line);
         }
 
@@ -184,21 +278,98 @@ scene.add(earth);
         function animate(currentTime) {
             requestAnimationFrame(animate);
 
-            const deltaTime = (currentTime - lastUpdateTime) / 1000;
-            const stepCount = Math.floor(deltaTime * ORBIT_ANIMATION_SPEED * 60);
+            // Tüm uyduları sabit konumda göster
+            Object.keys(satellites).forEach(name => {
+                const data = allOrbitData[name];
+                if (data && data.length > 0) {
+                    // Her uyduyu yörüngesinin ilk noktasında göster
+                    if (satellites[name]) {
+                        satellites[name].visible = true;
+                        // Eğer seçili uydu ise animasyonla hareket ettirilecek, diğerleri sabit
+                        if (name !== selectedSatelliteName) {
+                            satellites[name].position.set(data[0].x, data[0].y, data[0].z);
+                        }
+                    }
+                }
+            });
 
-            if (orbitData.length > 0 && stepCount > 0) {
-                lastUpdateTime = currentTime;
-                
+            // Sadece seçili uydunun animasyonunu ve info panelini güncelle
+            if (orbitData.length > 1 && selectedSatelliteName && satellites[selectedSatelliteName]) {
+                // Simülasyon hızını ayarla (ör: 60x hızlandırılmış)
+                const SIMULATION_SPEED = 60; // 1 gerçek saniye = 60 simülasyon saniyesi
+                const now = currentTime;
+                const realDelta = (now - lastUpdateTime) / 1000; // sn
+                lastUpdateTime = now;
 
-                currentDataIndex = (currentDataIndex + stepCount) % orbitData.length;
-                
-                const currentPos = orbitData[currentDataIndex];
-                satellite.position.set(currentPos.x, currentPos.y, currentPos.z);
+                // Simüle edilen zamanı ilerlet
+                if (!currentAnimationTime) {
+                    currentAnimationTime = new Date(orbitData[0].time);
+                }
+                currentAnimationTime = new Date(currentAnimationTime.getTime() + realDelta * 1000 * SIMULATION_SPEED);
+
+                // Şu anki simülasyon zamanına en yakın iki veri noktasını bul
+                let i = 0;
+                while (i < orbitData.length - 2 && new Date(orbitData[i+1].time) <= currentAnimationTime) {
+                    i++;
+                }
+                // Eğer sona geldiyse başa sar
+                if (i >= orbitData.length - 2) {
+                    currentAnimationTime = new Date(orbitData[0].time);
+                    i = 0;
+                }
+                currentDataIndex = i;
+                const prev = orbitData[i];
+                const next = orbitData[i+1];
+                const prevTime = new Date(prev.time);
+                const nextTime = new Date(next.time);
+                // İki nokta arasında interpolasyon oranı
+                const total = nextTime - prevTime;
+                const part = currentAnimationTime - prevTime;
+                const t = total > 0 ? part / total : 0;
+                // Konumu hesapla
+                const x = prev.x + (next.x - prev.x) * t;
+                const y = prev.y + (next.y - prev.y) * t;
+                const z = prev.z + (next.z - prev.z) * t;
+                satellites[selectedSatelliteName].position.set(x, y, z);
+
+                // Hız (km/h), yükseklik (km), enlem, boylam
+                // Eğer JSON'da doğrudan varsa kullan, yoksa hesapla
+                let speedKmh = 0, heightKm = 0, lat = 0, lon = 0;
+                if (prev.vel_kms !== undefined) {
+                    speedKmh = prev.vel_kms * 3600; // km/s -> km/h
+                } else {
+                    // fallback: iki nokta arası mesafe/zaman
+                    const dx = next.x - prev.x;
+                    const dy = next.y - prev.y;
+                    const dz = next.z - prev.z;
+                    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz); // km
+                    const timeElapsed = (nextTime - prevTime) / 1000; // saniye
+                    speedKmh = timeElapsed > 0 ? (distance / timeElapsed) * 3600 : 0;
+                }
+                if (prev.dist_km !== undefined) {
+                    heightKm = prev.dist_km - EARTH_RADIUS_KM;
+                } else {
+                    heightKm = Math.sqrt(prev.x*prev.x + prev.y*prev.y + prev.z*prev.z) - EARTH_RADIUS_KM;
+                }
+                if (prev.lat !== undefined && prev.lon !== undefined) {
+                    lat = prev.lat;
+                    lon = prev.lon;
+                } else {
+                    // ECI'den enlem/boylam hesapla (yaklaşık)
+                    const r = Math.sqrt(prev.x*prev.x + prev.y*prev.y + prev.z*prev.z);
+                    lat = Math.asin(prev.z / r) * 180 / Math.PI;
+                    lon = Math.atan2(prev.y, prev.x) * 180 / Math.PI;
+                }
+
+                // Info panelini güncelle
+                document.getElementById('info-name').textContent = selectedSatelliteName || '---';
+                document.getElementById('info-speed').textContent = speedKmh.toFixed(0) + ' km/h';
+                document.getElementById('info-alt').textContent = heightKm.toFixed(0) + ' km';
+                document.getElementById('info-lat').textContent = lat.toFixed(2) + '°';
+                document.getElementById('info-lon').textContent = lon.toFixed(2) + '°';
             }
-            
-            earth.rotation.y += 0.001; 
 
+            earth.rotation.y += 0.001;
             controls.update();
             renderer.render(scene, camera);
         }
@@ -210,7 +381,7 @@ scene.add(earth);
         }
 
         init();
-        animate(performance.now());
+    animate(performance.now());
     </script>
 </body>
 </html>
