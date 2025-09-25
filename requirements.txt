@@ -1,0 +1,8 @@
+sgp4
+skyfield
+numpy
+pandas
+plotly
+flask
+matplotlib 
+requests
