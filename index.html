@@ -292,6 +292,15 @@ let currentAnimationTime = null; // Simüle edilen zaman (Date objesi)
             const startPos = orbitData[0];
             if (satellites[name]) {
                 satellites[name].position.set(startPos.x, startPos.y, startPos.z);
+                // Kamera ve controls'u uyduya yakınlaştır
+                // Kamera, uydunun biraz uzağında ve Dünya'ya bakacak şekilde konumlanır
+                const camTarget = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+                const camDir = camTarget.clone().normalize();
+                const camDist = 1200; // Kamera uydudan ne kadar uzakta olsun (uygun bir değer)
+                const camPos = camTarget.clone().add(camDir.multiplyScalar(camDist));
+                camera.position.set(camPos.x, camPos.y, camPos.z);
+                controls.target.copy(camTarget);
+                controls.update();
             }
             console.log(`Uydu değiştirildi: ${name}.`);
         }
@@ -300,7 +309,7 @@ let currentAnimationTime = null; // Simüle edilen zaman (Date objesi)
 window.trailPoints = [];
 window.trailLine = null;
 function updateTrail(newPos) {
-    const maxTrail = 120; // iz uzunluğu
+    const maxTrail = 400; // iz uzunluğu artırıldı
     window.trailPoints.push(new THREE.Vector3(newPos.x, newPos.y, newPos.z));
     if (window.trailPoints.length > maxTrail) window.trailPoints.shift();
     if (!window.trailLine) {
